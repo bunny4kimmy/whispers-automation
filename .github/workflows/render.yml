@@ -48,3 +48,17 @@ jobs:
           curl -L -X POST "${{ secrets.GAS_WEB_APP_URL }}" \
           -H "Content-Type: application/json" \
           -d '{"action": "upload", "file_id": "DAILY_OUTPUT_ID", "quote": "${{ github.event.client_payload.quote }}"}'
+
+      - name: Upload Video to Drive and Trigger YouTube
+        run: |
+          # 1. Upload the actual video file (output.mp4) to your Google Web App
+          # We send the file as base64 so the Google Script can rebuild it as a file
+          VIDEO_BASE64=$(base64 -w 0 output.mp4)
+          
+          curl -L -X POST "${{ secrets.GAS_WEB_APP_URL }}" \
+          -H "Content-Type: application/json" \
+          -d "{
+            \"action\": \"upload_to_youtube\",
+            \"video_data\": \"$VIDEO_BASE64\",
+            \"quote\": \"${{ github.event.client_payload.quote }}\"
+          }"    
