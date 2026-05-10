@@ -21,18 +21,18 @@ jobs:
 
       - name: Render Video with Music
         env:
-          # We pass the quote as an ENV variable to prevent Bash shell expansion issues
           RAW_QUOTE: ${{ github.event.client_payload.quote }}
         run: |
-          # 1. Pick a random track
-          SELECTED_MUSIC=$(ls music/*.mp3 | shuf -n 1)
+          # 1. Pick a random track safely (handles spaces in filenames)
+          SELECTED_MUSIC=$(find music -name "*.mp3" | shuf -n 1)
+          echo "Selected music: $SELECTED_MUSIC"
           
           # 2. ESCAPING MAGIC: 
           # We escape single quotes for FFmpeg and replace newlines with \n
           CLEAN_QUOTE=$(echo "$RAW_QUOTE" | sed "s/'/\\\\\\'/g" | awk '{printf "%s\\n", $0}' | sed 's/\\n$//')
 
           # 3. Use the Lean FFmpeg settings
-          # Note: We wrap the entire VF in double quotes, and the text in escaped single quotes
+          # Added quotes around "$SELECTED_MUSIC" to prevent "Invalid Data" errors
           ffmpeg -loop 1 -i input.jpg -stream_loop -1 -i "$SELECTED_MUSIC" \
           -vf "scale=8000:-1,zoompan=z='min(zoom+0.0008,1.3)':d=250:x='iw/2-(iw/zoom/2)':y='ih/2-(ih/zoom/2)', \
           scale=1080:1920,setsar=1, \
@@ -50,10 +50,8 @@ jobs:
 
       - name: Finalize and Upload to YouTube
         run: |
-          # 1. Convert video to Base64
           VIDEO_BASE64=$(base64 -w 0 output.mp4)
           
-          # 2. Create the payload using a Here-Doc to handle JSON safely
           cat <<EOF > payload.json
           {
             "action": "upload_to_youtube",
@@ -62,7 +60,6 @@ jobs:
           }
           EOF
           
-          # 3. Send to Google with a long timeout and failure flag
           curl -v -f -L --max-time 300 -X POST "${{ secrets.GAS_WEB_APP_URL }}" \
           -H "Content-Type: application/json" \
           -d @payload.json
