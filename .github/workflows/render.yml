@@ -59,11 +59,9 @@ jobs:
           }
           EOF
           
-          # 3. The Triple-Method-Preserving Curl
-          # This forces curl to stay in POST mode regardless of the redirect type (301, 302, or 303)
-          curl -v -f -L \
-          --post301 --post302 --post303 \
-          --max-time 300 \
+          # 3. Use the Location-Follow without forced method flags
+          # Google sometimes prefers a fresh redirect follow
+          curl -L -v \
           -H "Content-Type: application/json" \
           -d @payload.json \
           "${{ secrets.GAS_WEB_APP_URL }}"
