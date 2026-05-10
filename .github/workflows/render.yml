@@ -46,10 +46,8 @@ jobs:
 
       - name: Finalize and Upload to YouTube
         run: |
-          # 1. Convert video to Base64
           VIDEO_BASE64=$(base64 -w 0 output.mp4)
           
-          # 2. Create the payload
           cat <<EOF > payload.json
           {
             "action": "upload_to_youtube",
@@ -58,7 +56,10 @@ jobs:
           }
           EOF
           
-          # 3. Send to Google with a longer timeout (--max-time)
+          # Added -v (verbose) to see the conversation and -f (fail) to stop if Google errors
+          curl -v -f -L --max-time 300 -X POST "${{ secrets.GAS_WEB_APP_URL }}" \
+          -H "Content-Type: application/json" \
+          -d @payload.jsono Google with a longer timeout (--max-time)
           curl -L --max-time 300 -X POST "${{ secrets.GAS_WEB_APP_URL }}" \
           -H "Content-Type: application/json" \
           -d @payload.json
