@@ -44,18 +44,12 @@ jobs:
           name: daily-resilience-video
           path: output.mp4
 
-      - name: Tell Google to Upload
-        run: |
-          curl -L -X POST "${{ secrets.GAS_WEB_APP_URL }}" \
-          -H "Content-Type: application/json" \
-          -d '{"action": "upload", "file_id": "DAILY_OUTPUT_ID", "quote": "${{ github.event.client_payload.quote }}"}'
-
-      - name: Upload Video to Drive and Trigger YouTube
+      - name: Finalize and Upload to YouTube
         run: |
           # 1. Convert video to Base64
           VIDEO_BASE64=$(base64 -w 0 output.mp4)
           
-          # 2. Create a temporary JSON file to avoid shell escaping issues
+          # 2. Create the payload
           cat <<EOF > payload.json
           {
             "action": "upload_to_youtube",
@@ -64,7 +58,7 @@ jobs:
           }
           EOF
           
-          # 3. Send the file using curl
-          curl -L -X POST "${{ secrets.GAS_WEB_APP_URL }}" \
+          # 3. Send to Google with a longer timeout (--max-time)
+          curl -L --max-time 300 -X POST "${{ secrets.GAS_WEB_APP_URL }}" \
           -H "Content-Type: application/json" \
-          -d @payload.json  
+          -d @payload.json
