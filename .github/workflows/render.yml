@@ -42,3 +42,9 @@ jobs:
         with:
           name: daily-resilience-video
           path: output.mp4
+
+      - name: Tell Google to Upload
+        run: |
+          curl -L -X POST "${{ secrets.GAS_WEB_APP_URL }}" \
+          -H "Content-Type: application/json" \
+          -d '{"action": "upload", "file_id": "DAILY_OUTPUT_ID", "quote": "${{ github.event.client_payload.quote }}"}'
