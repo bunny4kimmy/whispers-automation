@@ -8,7 +8,13 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout Repo
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
+
+      # THIS IS THE MISSING PIECE:
+      - name: Setup FFmpeg
+        uses: animmouse/setup-ffmpeg@v1
+        with:
+          version: '7.1'
 
       - name: Download Image from Drive
         run: |
@@ -17,9 +23,10 @@ jobs:
       - name: Render Video with FFmpeg
         run: |
           # Create a video with text overlay and slow zoom
-          ffmpeg -loop 1 -i input.jpg -vf "scale=8000:-1,zoompan=z='min(zoom+0.001,1.5)':d=250:x='iw/2-(iw/zoom/2)':y='ih/2-(ih/zoom/2)',scale=1080:1920,drawtext=text='${{ github.event.client_payload.quote }}':fontcolor=white:fontsize=48:x=(w-text_w)/2:y=(h-text_h)/2:box=1:boxcolor=black@0.5:boxborderw=10" -c:v libx264 -t 10 -pix_fmt yuv420p output.mp4
+          ffmpeg -loop 1 -i input.jpg -vf "scale=8000:-1,zoompan=z='min(zoom+0.001,1.5)':d=250:x='iw/2-(iw/zoom/2)':y='ih/2-(ih/zoom/2)',scale=1080:1920,drawtext=text='${{ github.event.client_payload.quote }}':fontcolor=white:fontsize=64:x=(w-text_w)/2:y=(h-text_h)/2:box=1:boxcolor=black@0.5:boxborderw=15" -c:v libx264 -t 10 -pix_fmt yuv420p output.mp4
 
-      - name: Upload to YouTube (Simplified Placeholder)
-        run: |
-          echo "Using YouTube API to upload output.mp4..."
-          # You would add your python upload script here
+      - name: Upload Video Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: daily-resilience-video
+          path: output.mp4
