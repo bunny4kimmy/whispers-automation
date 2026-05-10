@@ -10,7 +10,7 @@ jobs:
       - name: Checkout Repo
         uses: actions/checkout@v4
 
-      # THIS IS THE MISSING PIECE:
+      # Installs FFmpeg 7.x (Standard for 2026)
       - name: Setup FFmpeg
         uses: animmouse/setup-ffmpeg@v1
         with:
@@ -18,15 +18,18 @@ jobs:
 
       - name: Download Image from Drive
         run: |
+          # Use the File ID sent from Google Apps Script
           wget --no-check-certificate 'https://docs.google.com/uc?export=download&id=${{ github.event.client_payload.file_id }}' -O input.jpg
 
       - name: Render Video with FFmpeg
         run: |
-          # Create a video with text overlay and slow zoom
-          ffmpeg -loop 1 -i input.jpg -vf "scale=8000:-1,zoompan=z='min(zoom+0.001,1.5)':d=250:x='iw/2-(iw/zoom/2)':y='ih/2-(ih/zoom/2)',scale=1080:1920,drawtext=text='${{ github.event.client_payload.quote }}':fontcolor=white:fontsize=64:x=(w-text_w)/2:y=(h-text_h)/2:box=1:boxcolor=black@0.5:boxborderw=15" -c:v libx264 -t 10 -pix_fmt yuv420p output.mp4
+          # Professional vertical render: Zoom effect + Text overlay
+          ffmpeg -loop 1 -i input.jpg -vf "scale=8000:-1,zoompan=z='min(zoom+0.001,1.5)':d=250:x='iw/2-(iw/zoom/2)':y='ih/2-(ih/zoom/2)',scale=1080:1920,drawtext=text='${{ github.event.client_payload.quote }}':fontcolor=white:fontsize=64:x=(w-text_w)/2:y=(h-text_h)/2:box=1:boxcolor=black@0.5:boxborderw=20" -c:v libx264 -t 10 -pix_fmt yuv420p output.mp4
 
-      - name: Upload Video Artifact
+      - name: Upload Video to GitHub
         uses: actions/upload-artifact@v4
         with:
           name: daily-resilience-video
           path: output.mp4
+          # Set archive to false in 2026 to view the MP4 directly in browser
+          compression-level: 0
