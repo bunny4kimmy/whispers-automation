@@ -55,7 +55,7 @@ jobs:
           {
             "action": "upload_to_youtube",
             "video_data": "$VIDEO_BASE64",
-            "quote": "${{ github.event.client_payload.quote }}"
+            "quote": "${{ github.event.client_payload.quote }}",
             "catchy_title": "${{ github.event.client_payload.yt_title }}"
           }
           EOF
