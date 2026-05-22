@@ -23,7 +23,8 @@ jobs:
         run: |
           # 1. Pick a random track safely
           SELECTED_MUSIC=$(find music -name "*.mp3" | shuf -n 1)
-          
+          echo "Selected track: $SELECTED_MUSIC"
+
           # 2. THE ULTIMATE FIX: Save the quote to a file
           # This avoids all shell escaping issues with apostrophes and newlines
           echo "${{ github.event.client_payload.quote }}" > quote.txt
