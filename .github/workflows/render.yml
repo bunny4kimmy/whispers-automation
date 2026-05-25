@@ -21,54 +21,73 @@ jobs:
         with:
           version: '7.1'
 
+      # ── Fonts ────────────────────────────────────────────────────────────────
+      # fonts-noto-color-emoji supplies the 🌿 glyph (U+1F33F).
+      # DejaVu is kept for the quote / body text rendering.
       - name: Install font dependencies
-        run: sudo apt-get install -y fonts-dejavu fonts-noto
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y fonts-dejavu fonts-noto fonts-noto-color-emoji
 
+      # ── Source image ─────────────────────────────────────────────────────────
       - name: Download Image from Drive
         run: |
           wget --no-check-certificate \
             'https://docs.google.com/uc?export=download&id=${{ github.event.client_payload.file_id }}' \
             -O input.jpg
 
+      # ── Render Video ─────────────────────────────────────────────────────────
       - name: Render Video with Music
         env:
           QUOTE: ${{ github.event.client_payload.quote }}
           TITLE: ${{ github.event.client_payload.ytTitle }}
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
         run: |
+          # ── Pick background music ──────────────────────────────────────────
           SELECTED_MUSIC=$(find music -name "*.mp3" | shuf -n 1)
           echo "Selected track: $SELECTED_MUSIC"
 
-          GEMINI_PAYLOAD=$(jq -n \
+          # ── Generate CTA via Gemini ────────────────────────────────────────
+          # FIX 1: gemini-pro is deprecated → use gemini-1.5-flash.
+          # Write the JSON payload to a temp file so special characters in
+          # $QUOTE / $TITLE are safely handled by jq, not the shell.
+          jq -n \
             --arg q "$QUOTE" \
             --arg t "$TITLE" \
             '{
               contents: [{
                 parts: [{
-                  text: "Given the quote: \($q) and title: \($t), generate a short reflective call-to-action question (one sentence, no hashtags) that feels empathetic and invites quiet engagement."
+                  text: ("Given the quote: " + $q + " and title: " + $t + ", generate a short reflective call-to-action question (one sentence, no hashtags) that feels empathetic and invites quiet engagement.")
                 }]
-              }]
-            }')
+              }],
+              generationConfig: { maxOutputTokens: 80, temperature: 0.7 }
+            }' > gemini_payload.json
 
           CTA=$(curl -s -X POST \
             -H "Content-Type: application/json; charset=utf-8" \
-            -d "$GEMINI_PAYLOAD" \
-            "https://generativelanguage.googleapis.com/v1beta/models/gemini-pro:generateContent?key=$GEMINI_API_KEY" \
+            -d @gemini_payload.json \
+            "https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=$GEMINI_API_KEY" \
             | jq -r '.candidates[0].content.parts[0].text // empty')
 
-          CTA=$(echo "$CTA" | xargs)
+          # Strip leading/trailing whitespace; fall back if empty
+          CTA=$(echo "$CTA" | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')
           if [ -z "$CTA" ]; then
             CTA="What does this moment teach you about patience?"
           fi
 
           echo "CTA resolved: $CTA"
-          echo "$QUOTE" > quote.txt
-          echo "$CTA"   > cta.txt
-          echo "$CTA"   > cta_cache.txt
 
-          python3 -c "import sys; sys.stdout.buffer.write('Like if you needed this today  \U0001F33F'.encode('utf-8'))" > like.txt
-          echo "like.txt written: $(cat like.txt)"
+          # Write text files used by FFmpeg drawtext
+          printf '%s' "$QUOTE" > quote.txt
+          printf '%s' "$CTA"   > cta.txt
+          printf '%s' "$CTA"   > cta_cache.txt
 
+          # FIX 2: Replace emoji with plain ASCII so DejaVu renders it cleanly.
+          # The tilde ~ acts as a soft leaf-style bullet that DejaVu can render.
+          printf 'Like if you needed this today  ~' > like.txt
+          echo "like.txt contents: $(cat like.txt)"
+
+          # ── Render with FFmpeg ────────────────────────────────────────────
           ffmpeg -loop 1 -i input.jpg \
             -stream_loop -1 -i "$SELECTED_MUSIC" \
             -vf "scale=8000:-1, \
@@ -94,26 +113,32 @@ jobs:
             -c:a aac -shortest \
             output.mp4
 
+      # ── Upload artifact ───────────────────────────────────────────────────────
       - name: Upload Video Artifact
         uses: actions/upload-artifact@v4
         with:
           name: daily-resilience-video
           path: output.mp4
 
+      # ── Upload to YouTube ─────────────────────────────────────────────────────
       - name: Finalize and Upload to YouTube
         env:
           QUOTE: ${{ github.event.client_payload.quote }}
           TITLE: ${{ github.event.client_payload.ytTitle }}
         run: |
-          VIDEO_BASE64=$(base64 -w 0 output.mp4)
+          # FIX 3: base64 of a video file is too large to pass as a shell
+          # variable to `jq --arg` (hits OS ARG_MAX / kernel limit).
+          # Write the base64 to a file and use `--rawfile` instead — jq reads
+          # the file content directly without going through the env/arg space.
+          base64 -w 0 output.mp4 > video_b64.txt
           CTA=$(cat cta_cache.txt)
 
           jq -n \
-            --arg action  "upload_to_youtube" \
-            --arg video   "$VIDEO_BASE64" \
-            --arg quote   "$QUOTE" \
-            --arg cta     "$CTA" \
-            --arg ytTitle "$TITLE" \
+            --arg    action  "upload_to_youtube" \
+            --rawfile video   video_b64.txt \
+            --arg    quote   "$QUOTE" \
+            --arg    cta     "$CTA" \
+            --arg    ytTitle "$TITLE" \
             '{
               action:     $action,
               video_data: $video,
