@@ -8,6 +8,10 @@ jobs:
   build:
     runs-on: ubuntu-latest
 
+    defaults:
+      run:
+        shell: bash
+
     steps:
       - name: Checkout Repo
         uses: actions/checkout@v4
@@ -17,11 +21,8 @@ jobs:
         with:
           version: '7.1'
 
-      # Install Noto fonts so the leaf glyph (❧) is available via DejaVu fallback.
-      # NotoColorEmoji is intentionally NOT used as an FFmpeg fontfile — it breaks
-      # Latin text rendering. We use a safe Unicode leaf from DejaVuSerif instead.
       - name: Install font dependencies
-        run: sudo apt-get install -y fonts-noto fonts-dejavu
+        run: sudo apt-get install -y fonts-dejavu fonts-noto
 
       - name: Download Image from Drive
         run: |
@@ -38,16 +39,13 @@ jobs:
           SELECTED_MUSIC=$(find music -name "*.mp3" | shuf -n 1)
           echo "Selected track: $SELECTED_MUSIC"
 
-          # --- FIX 1: Use jq to build the JSON payload safely ---
-          # Raw shell interpolation inside JSON breaks on apostrophes and special
-          # characters in QUOTE/TITLE. jq --arg escapes everything correctly.
           GEMINI_PAYLOAD=$(jq -n \
             --arg q "$QUOTE" \
             --arg t "$TITLE" \
             '{
               contents: [{
                 parts: [{
-                  text: ("Given the quote: \'" + $q + "\' and title: \'" + $t + "\', generate a short reflective call-to-action question (one sentence, no hashtags) that feels empathetic and invites quiet engagement.")
+                  text: "Given the quote: \($q) and title: \($t), generate a short reflective call-to-action question (one sentence, no hashtags) that feels empathetic and invites quiet engagement."
                 }]
               }]
             }')
@@ -58,8 +56,7 @@ jobs:
             "https://generativelanguage.googleapis.com/v1beta/models/gemini-pro:generateContent?key=$GEMINI_API_KEY" \
             | jq -r '.candidates[0].content.parts[0].text // empty')
 
-          # --- FIX 2: Robust fallback — catches null, empty, and whitespace-only ---
-          CTA=$(echo "$CTA" | xargs)   # strip surrounding whitespace/newlines
+          CTA=$(echo "$CTA" | xargs)
           if [ -z "$CTA" ]; then
             CTA="What does this moment teach you about patience?"
           fi
@@ -69,10 +66,9 @@ jobs:
           echo "$CTA"   > cta.txt
           echo "$CTA"   > cta_cache.txt
 
-          # --- FIX 3: Leaf rendered as Unicode glyph ❧ (U+2767) from DejaVuSerif ---
-          # Do NOT use NotoColorEmoji.ttf as fontfile — it cannot render Latin text.
-          # Do NOT wrap text in *asterisks* — FFmpeg drawtext prints them literally.
-          # The like line is left-anchored at x=80 (safe zone, clears platform icons).
+          python3 -c "import sys; sys.stdout.buffer.write('Like if you needed this today  \U0001F33F'.encode('utf-8'))" > like.txt
+          echo "like.txt written: $(cat like.txt)"
+
           ffmpeg -loop 1 -i input.jpg \
             -stream_loop -1 -i "$SELECTED_MUSIC" \
             -vf "scale=8000:-1, \
@@ -88,7 +84,7 @@ jobs:
             fontcolor=white@0.85:fontsize=40: \
             x=80:y=(h*72/100): \
             box=1:boxcolor=0x00000000:boxborderw=0:line_spacing=18:fix_bounds=1, \
-          drawtext=text='Like if you needed this today  \u2767': \
+          drawtext=textfile=like.txt: \
             fontfile=/usr/share/fonts/truetype/dejavu/DejaVuSerif-Italic.ttf: \
             fontcolor=white@0.9:fontsize=36: \
             x=80:y=h-220: \
@@ -112,9 +108,6 @@ jobs:
           VIDEO_BASE64=$(base64 -w 0 output.mp4)
           CTA=$(cat cta_cache.txt)
 
-          # --- FIX 4: Use jq to build upload payload safely ---
-          # Direct heredoc interpolation corrupts JSON when QUOTE/CTA contain
-          # quotes, newlines, or backslashes. jq --arg handles all escaping.
           jq -n \
             --arg action  "upload_to_youtube" \
             --arg video   "$VIDEO_BASE64" \
@@ -133,7 +126,6 @@ jobs:
             -H "Content-Type: application/json" \
             -d @payload.json \
             "${{ secrets.GAS_WEB_APP_URL }}"
-
 
 
 #name: Render Daily Video
