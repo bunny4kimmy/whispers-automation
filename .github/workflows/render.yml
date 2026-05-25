@@ -21,46 +21,41 @@ jobs:
         with:
           version: '7.1'
 
-      # ── Fonts ────────────────────────────────────────────────────────────────
-      # fonts-noto-color-emoji supplies the 🌿 glyph (U+1F33F).
-      # DejaVu is kept for the quote / body text rendering.
+      # fonts-noto-color-emoji supplies the leaf glyph fallback.
+      # DejaVu handles all Latin quote / CTA text.
       - name: Install font dependencies
         run: |
           sudo apt-get update -qq
-          sudo apt-get install -y fonts-dejavu fonts-noto fonts-noto-color-emoji
+          sudo apt-get install -y fonts-dejavu fonts-noto fonts-noto-color-emoji python3
 
-      # ── Source image ─────────────────────────────────────────────────────────
+      # ── Source image ──────────────────────────────────────────────────────────
       - name: Download Image from Drive
         run: |
           wget --no-check-certificate \
             'https://docs.google.com/uc?export=download&id=${{ github.event.client_payload.file_id }}' \
             -O input.jpg
 
-      # ── Render Video ─────────────────────────────────────────────────────────
+      # ── Render Video ──────────────────────────────────────────────────────────
       - name: Render Video with Music
         env:
           QUOTE: ${{ github.event.client_payload.quote }}
           TITLE: ${{ github.event.client_payload.ytTitle }}
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
         run: |
-          # ── Pick background music ──────────────────────────────────────────
           SELECTED_MUSIC=$(find music -name "*.mp3" | shuf -n 1)
           echo "Selected track: $SELECTED_MUSIC"
 
-          # ── Generate CTA via Gemini ────────────────────────────────────────
-          # FIX 1: gemini-pro is deprecated → use gemini-1.5-flash.
-          # Write the JSON payload to a temp file so special characters in
-          # $QUOTE / $TITLE are safely handled by jq, not the shell.
+          # ── Generate CTA via Gemini ──────────────────────────────────────
           jq -n \
             --arg q "$QUOTE" \
             --arg t "$TITLE" \
             '{
               contents: [{
                 parts: [{
-                  text: ("Given the quote: " + $q + " and title: " + $t + ", generate a short reflective call-to-action question (one sentence, no hashtags) that feels empathetic and invites quiet engagement.")
+                  text: ("Given the quote: " + $q + " and title: " + $t + ", generate a short reflective call-to-action question (one sentence, no hashtags, under 60 characters) that feels empathetic and invites quiet engagement.")
                 }]
               }],
-              generationConfig: { maxOutputTokens: 80, temperature: 0.7 }
+              generationConfig: { maxOutputTokens: 60, temperature: 0.7 }
             }' > gemini_payload.json
 
           CTA=$(curl -s -X POST \
@@ -69,7 +64,6 @@ jobs:
             "https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=$GEMINI_API_KEY" \
             | jq -r '.candidates[0].content.parts[0].text // empty')
 
-          # Strip leading/trailing whitespace; fall back if empty
           CTA=$(echo "$CTA" | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')
           if [ -z "$CTA" ]; then
             CTA="What does this moment teach you about patience?"
@@ -77,17 +71,39 @@ jobs:
 
           echo "CTA resolved: $CTA"
 
-          # Write text files used by FFmpeg drawtext
+          # ── Write quote.txt ──────────────────────────────────────────────
           printf '%s' "$QUOTE" > quote.txt
-          printf '%s' "$CTA"   > cta.txt
-          printf '%s' "$CTA"   > cta_cache.txt
 
-          # FIX 2: Replace emoji with plain ASCII so DejaVu renders it cleanly.
-          # The tilde ~ acts as a soft leaf-style bullet that DejaVu can render.
-          printf 'Like if you needed this today  ~' > like.txt
-          echo "like.txt contents: $(cat like.txt)"
+          # ── Wrap CTA into max ~38 chars per line so it fits left of the
+          #    platform icon rail (safe zone ends ~72% of 1080px = ~778px).
+          #    Python's textwrap is the cleanest way to do this in bash.
+          python3 - "$CTA" << 'PYEOF'
+          import sys, textwrap
+          text = sys.argv[1]
+          wrapped = textwrap.fill(text, width=38)
+          with open("cta.txt", "w") as f:
+              f.write(wrapped)
+          with open("cta_cache.txt", "w") as f:
+              f.write(text)   # cache keeps the original single-line CTA for the payload
+          PYEOF
 
-          # ── Render with FFmpeg ────────────────────────────────────────────
+          echo "cta.txt:"
+          cat cta.txt
+
+          # ── Like line — plain ASCII, safe for DejaVu ─────────────────────
+          # Positioned well above the channel-name overlay:
+          #   YouTube channel bar starts ~h-180, so we place this at h-320
+          #   giving ~140px clear breathing room.
+          printf 'Like if you needed this today' > like.txt
+
+          # ── FFmpeg render ────────────────────────────────────────────────
+          # Layout (1080x1920):
+          #   Quote block  : y = h/3 - text_h/2          (~upper third)
+          #   CTA (2 lines): y = h*70/100                 (~70% — safe above icons)
+          #   Like line    : y = h-320                    (~83% — above channel overlay)
+          #
+          # Right-edge safety: x=80, font 40px, ~38 chars ≈ 760px → ends at ~840px
+          # Platform icon rail starts at ~860px — 20px clearance.
           ffmpeg -loop 1 -i input.jpg \
             -stream_loop -1 -i "$SELECTED_MUSIC" \
             -vf "scale=8000:-1, \
@@ -101,13 +117,13 @@ jobs:
           drawtext=textfile=cta.txt: \
             fontfile=/usr/share/fonts/truetype/dejavu/DejaVuSans-Oblique.ttf: \
             fontcolor=white@0.85:fontsize=40: \
-            x=80:y=(h*72/100): \
+            x=80:y=(h*70/100): \
             box=1:boxcolor=0x00000000:boxborderw=0:line_spacing=18:fix_bounds=1, \
           drawtext=textfile=like.txt: \
             fontfile=/usr/share/fonts/truetype/dejavu/DejaVuSerif-Italic.ttf: \
-            fontcolor=white@0.9:fontsize=36: \
-            x=80:y=h-220: \
-            box=1:boxcolor=black@0.25:boxborderw=16:fix_bounds=1" \
+            fontcolor=white@0.92:fontsize=34: \
+            x=80:y=h-320: \
+            box=1:boxcolor=black@0.30:boxborderw=20:fix_bounds=1" \
             -c:v libx264 -crf 28 -preset faster \
             -t 10 -pix_fmt yuv420p \
             -c:a aac -shortest \
@@ -126,10 +142,6 @@ jobs:
           QUOTE: ${{ github.event.client_payload.quote }}
           TITLE: ${{ github.event.client_payload.ytTitle }}
         run: |
-          # FIX 3: base64 of a video file is too large to pass as a shell
-          # variable to `jq --arg` (hits OS ARG_MAX / kernel limit).
-          # Write the base64 to a file and use `--rawfile` instead — jq reads
-          # the file content directly without going through the env/arg space.
           base64 -w 0 output.mp4 > video_b64.txt
           CTA=$(cat cta_cache.txt)
 
